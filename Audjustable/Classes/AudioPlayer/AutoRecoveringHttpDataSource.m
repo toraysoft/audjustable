@@ -41,6 +41,7 @@
 #import <Foundation/Foundation.h>
 #import <SystemConfiguration/SystemConfiguration.h>
 #import "AutoRecoveringHttpDataSource.h"
+#import "NIDebuggingTools.h"
 
 #define MAX_IMMEDIATE_RECONNECT_ATTEMPTS (8)
 
@@ -173,6 +174,7 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
 
 -(void) attemptReconnect
 {
+    NIDPRINT(@"重连！");
     reconnectAttempts++;
     
     [self seekToOffset:self.position];
@@ -180,8 +182,10 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
 
 -(void) dataSourceErrorOccured:(DataSource*)dataSource
 {
+    NIDPRINT(@"数据源出错了");
     if (![self hasGotNetworkConnection])
     {
+        
         waitingForNetwork = YES;
         
         return;
@@ -189,12 +193,18 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
     
     if (reconnectAttempts > MAX_IMMEDIATE_RECONNECT_ATTEMPTS)
     {
+        NIDPRINT(@"每秒钟的重连");
         [self performSelector:@selector(attemptReconnect) withObject:nil afterDelay:5];
     }
     else
     {
+        NIDPRINT(@"马上重连一次");
         [self attemptReconnect];
     }
+}
+
+- (NSString *)description{
+    return [((HttpDataSource *)self.innerDataSource).url absoluteString];
 }
 
 @end

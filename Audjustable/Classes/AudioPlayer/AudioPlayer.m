@@ -40,6 +40,7 @@
 #import "HttpDataSource.h"
 #import "LocalFileDataSource.h"
 #import "libkern/OSAtomic.h"
+#import "NIDebuggingTools.h"
 
 #define BitRateEstimationMinPackets (64)
 #define AudioPlayerBuffersNeededToStart (16)
@@ -324,29 +325,41 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
     
     switch (internalState)
     {
-        case AudioPlayerInternalStateInitialised:
+        case AudioPlayerInternalStateInitialised:{
             newState = AudioPlayerStateReady;
+            NIDPRINT(@"播放器准备好了");
+        }
             break;
         case AudioPlayerInternalStateRunning:
         case AudioPlayerInternalStateStartingThread:
         case AudioPlayerInternalStateWaitingForData:
         case AudioPlayerInternalStateWaitingForQueueToStart:
         case AudioPlayerInternalStatePlaying:
-        case AudioPlayerInternalStateRebuffering:
+        case AudioPlayerInternalStateRebuffering:{
             newState = AudioPlayerStatePlaying;
+            NIDPRINT(@"播放器播放中");
+        }
             break;
         case AudioPlayerInternalStateStopping:
-        case AudioPlayerInternalStateStopped:
+        case AudioPlayerInternalStateStopped:{
             newState = AudioPlayerStateStopped;
+            NIDPRINT(@"播放器停止了");
+        }
             break;
-        case AudioPlayerInternalStatePaused:
+        case AudioPlayerInternalStatePaused:{
+            NIDPRINT(@"播放器暂停");
             newState = AudioPlayerStatePaused;
+        }
             break;
-        case AudioPlayerInternalStateDisposed:
+        case AudioPlayerInternalStateDisposed:{
             newState = AudioPlayerStateDisposed;
+            NIDPRINT(@"播放器关闭了");
+        }
             break;
-        case AudioPlayerInternalStateError:
+        case AudioPlayerInternalStateError:{
             newState = AudioPlayerStateError;
+            NIDPRINT(@"播放器出错了");
+        }
             break;
     }
     
@@ -393,6 +406,7 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
         
         audioQueueBufferCount = numberOfAudioQueueBuffers;
         audioQueueBuffer = calloc(sizeof(AudioQueueBufferRef), audioQueueBufferCount);
+
         
         audioQueueBufferRefLookupCount = audioQueueBufferCount * 2;
         audioQueueBufferLookup = calloc(sizeof(AudioQueueBufferRefLookupEntry), audioQueueBufferRefLookupCount);
@@ -412,9 +426,10 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
         threadFinishedCondLock = [[NSConditionLock alloc] initWithCondition:0];
         
         self.internalState = AudioPlayerInternalStateInitialised;
-        
+        NIDPRINT(@"【播放器】初始化完成");
         upcomingQueue = [[NSMutableArray alloc] init];
         bufferingQueue = [[NSMutableArray alloc] init];
+        bufferedEntries = [[NSMutableArray alloc] init];
     }
     
     return self;
@@ -526,6 +541,7 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
         }
         
         [upcomingQueue removeAllObjects];
+        [bufferedEntries removeAllObjects];
         
         dispatch_async(dispatch_get_main_queue(), ^
                        {
@@ -558,6 +574,7 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
              [upcomingQueue enqueue:[[QueueEntry alloc] initWithDataSource:dataSourceIn andQueueItemId:queueItemId]];
              
              self.internalState = AudioPlayerInternalStateRunning;
+             NIDPRINT(@"【播放器】运行中"); 
              [self processQueue:YES];
          }
          pthread_mutex_unlock(&playerMutex);
@@ -625,6 +642,7 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
                 }
             }
             
+            NIDPRINT(@"音频包每个缓存size %lu", currentlyReadingEntry->packetBufferSize);
             [currentlyReadingEntry updateAudioDataSource];
             
             AudioQueueSetParameter(audioQueue, kAudioQueueParam_Volume, 1);
@@ -690,6 +708,7 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
 
 -(void) handleAudioPackets:(const void*)inputData numberBytes:(UInt32)numberBytes numberPackets:(UInt32)numberPackets packetDescriptions:(AudioStreamPacketDescription*)packetDescriptionsIn
 {
+    NIDPRINT(@"有新的音频包可用");
     if (currentlyReadingEntry == nil)
     {
         return;
@@ -784,7 +803,7 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
     else
     {
         // CBR
-        
+        NIDPRINT(@"不变采样率");
     	int offset = 0;
         
 		while (numberBytes)
@@ -793,6 +812,7 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
             
 			if (bytesLeft < numberBytes)
 			{
+                NIDPRINT(@"把音频包塞进AudioQueue的缓冲吧。");
 				[self enqueueBuffer];
                 
                 if (seekToTimeWasRequested || self.internalState == AudioPlayerInternalStateStopped || self.internalState == AudioPlayerInternalStateStopping || self.internalState == AudioPlayerInternalStateDisposed)
@@ -837,6 +857,7 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
 
 -(void) handleAudioQueueOutput:(AudioQueueRef)audioQueueIn buffer:(AudioQueueBufferRef)bufferIn
 {
+    //NIDPRINT(@"AudioQueueService回调了");
     int bufferIndex = -1;
     
     if (audioQueueIn != audioQueue)
@@ -846,7 +867,7 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
     
     QueueEntry* entry = nil;
     
-    if (currentlyPlayingEntry)
+    if (currentlyPlayingEntry) // 正在播放
     {
         OSSpinLockLock(&currentlyPlayingLock);
         {
@@ -856,6 +877,7 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
                 
                 if (!audioQueueFlushing)
                 {
+                    //NIDPRINT(@"更新bytesPlayed");
                     currentlyPlayingEntry->bytesPlayed += bufferIn->mAudioDataByteSize;
                 }
             }
@@ -907,6 +929,8 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
     }
     
     if (!audioQueueFlushing && [self progress] > 4.0 && numberOfBuffersUsed == 0 ) {
+        NIDPRINT(@"需要重新缓冲啊！");
+        // 已经播放至少4秒了，但是没有缓冲被使用？
         self.internalState = AudioPlayerInternalStateRebuffering;
     }
     
@@ -971,6 +995,7 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
 
 -(void) handlePropertyChangeForQueue:(AudioQueueRef)audioQueueIn propertyID:(AudioQueuePropertyID)propertyId
 {
+    NSLog(@"%s", __PRETTY_FUNCTION__);
     if (audioQueueIn != audioQueue)
     {
         return;
@@ -987,12 +1012,14 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
             [NSRunLoop currentRunLoop];
             
             self.internalState = AudioPlayerInternalStatePlaying;
+            NIDPRINT(@"【播放器】AQ启动完成了，进入播放中状态");
         }
     }
 }
 
 -(void) enqueueBuffer
 {
+    NIDPRINT(@"把数据放进AUdioService缓冲");
     pthread_mutex_lock(&playerMutex);
     {
 		OSStatus error;
@@ -1060,6 +1087,7 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
         if (self.internalState == AudioPlayerInternalStateRebuffering && numberOfBuffersUsed >= AudioPlayerBuffersNeededToStart)
         {
             self.internalState = AudioPlayerInternalStatePlaying;
+            NIDPRINT(@"【播放器】重新缓冲到足够的播放的数据，进入播放状态");
         }
         
         if (++fillBufferIndex >= audioQueueBufferCount)
@@ -1097,11 +1125,17 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
 {
     errorCode = errorCodeIn;
     self.internalState = AudioPlayerInternalStateError;
+    
+    dispatch_async(dispatch_get_main_queue(), ^
+                   {
+                       [self.delegate audioPlayer:self didEncounterError:errorCode];
+                   });
 }
 
 -(void) createAudioQueue
 {
-	OSStatus error;
+	NSLog(@"%s", __PRETTY_FUNCTION__);
+    OSStatus error;
 	
 	[self startSystemBackgroundTask];
 	
@@ -1143,6 +1177,7 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
     
     // Allocate AudioQueue buffers
     
+    NIDPRINT(@"audioQueueBufferCount %d", audioQueueBufferCount);
     for (int i = 0; i < audioQueueBufferCount; i++)
     {
         error = AudioQueueAllocateBuffer(audioQueue, currentlyPlayingEntry->packetBufferSize, &audioQueueBuffer[i]);
@@ -1337,6 +1372,7 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
 
 -(void) setCurrentlyReadingEntry:(QueueEntry*)entry andStartPlaying:(BOOL)startPlaying
 {
+    NIDPRINT(@"设置当前加载的资源 %@，当前播放器是否正在播放 %d",entry.dataSource, startPlaying);
     pthread_mutex_lock(&queueBuffersMutex);
     
     if (startPlaying)
@@ -1353,6 +1389,7 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
     
     if (audioFileStream)
     {
+        NIDPRINT(@"关闭输入流?");
         AudioFileStreamClose(audioFileStream);
         
         audioFileStream = 0;
@@ -1360,11 +1397,13 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
     
     if (currentlyReadingEntry)
     {
+        NIDPRINT(@"关闭当前读取的流");
         currentlyReadingEntry.dataSource.delegate = nil;
         [currentlyReadingEntry.dataSource unregisterForEvents];
         [currentlyReadingEntry.dataSource close];
     }
     
+    NIDPRINT(@"创建新的输入流");
     currentlyReadingEntry = entry;
     currentlyReadingEntry.dataSource.delegate = self;
     
@@ -1383,10 +1422,23 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
     }
     else
     {
+        NIDPRINT(@"加入缓冲队列");
         [bufferingQueue enqueue:entry];
     }
     
     pthread_mutex_unlock(&queueBuffersMutex);
+}
+
+- (void)removeBufferedFlag:(NSObject *)queueItemId{
+    NSObject *target = nil;
+    for (NSObject *queueId in bufferedEntries) {
+        if ([queueItemId isEqual:queueId]) {
+            target = queueId;
+        }
+    }
+    if (target) {
+        [bufferedEntries removeObject:target];
+    }
 }
 
 -(void) audioQueueFinishedPlaying:(QueueEntry*)entry
@@ -1518,7 +1570,8 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
             
             if ([bufferingQueue peek] == currentlyPlayingEntry)
             {
-                [bufferingQueue dequeue];
+                QueueEntry *entry = [bufferingQueue dequeue];
+                [self removeBufferedFlag:entry.queueItemId];
             }
             
             OSSpinLockLock(&currentlyPlayingLock);
@@ -1545,7 +1598,8 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
             
             if ([bufferingQueue peek] == currentlyPlayingEntry)
             {
-                [bufferingQueue dequeue];
+                QueueEntry *entry = [bufferingQueue dequeue];
+                [self removeBufferedFlag:entry.queueItemId];
             }
             
             OSSpinLockLock(&currentlyPlayingLock);
@@ -1559,29 +1613,61 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
         }
         else if (currentlyReadingEntry == nil)
         {
+            // 当前没有正在读取的资源
             BOOL nextIsIncompatible = NO;
             
             QueueEntry* next = [bufferingQueue peek];
             
-            if (next == nil)
+            NIDPRINT(@"next from buffering queue %@", next);
+            BOOL loaded = NO;
+            for (NSObject *queueID in bufferedEntries) {
+                if ([next.queueItemId isEqual:queueID]) {
+                    loaded = YES;
+                }
+            }
+            NIDPRINT(@"is this loaded? %@, %d", bufferedEntries, loaded);
+            if (next == nil || loaded)
             {
                 next = [upcomingQueue peek];
                 
-                if (next)
+            }
+            
+            NIDPRINT(@"next after %@", next);
+            
+            if (next)
+            {
+                if (next->audioStreamBasicDescription.mSampleRate != 0)
                 {
-                    if (next->audioStreamBasicDescription.mSampleRate != 0)
+                    NIDPRINT(@"next audiodescrition ready");
+                    if (memcmp(&next->audioStreamBasicDescription, &currentAudioStreamBasicDescription, sizeof(currentAudioStreamBasicDescription)) != 0)
                     {
-                        if (memcmp(&next->audioStreamBasicDescription, &currentAudioStreamBasicDescription, sizeof(currentAudioStreamBasicDescription)) != 0)
-                        {
-                            nextIsIncompatible = YES;
-                        }
+                        nextIsIncompatible = YES;
                     }
+                }else{
+                    NIDPRINT(@"next audioDescritipon not ready");
                 }
             }
             
             if (nextIsIncompatible && currentlyPlayingEntry != nil)
             {
                 // Holding off cause next is incompatible
+                // 当前有正在播放的，并且下一首并不适合马上加载。那就按兵不动吧。
+                // 但现在的情况是，next就是现在播放中的entry。这就进不来这里了，而是一直在另一个分支里不断地循环重试。重演，一直死循环。
+                // 我们要做的事情就是，阻止它跑到另一个分支里去。
+                NIDPRINT(@"下一首不合适，停止");
+                if ([next.queueItemId isEqual:currentlyPlayingEntry.queueItemId]) {
+                    currentlyPlayingEntry = nil;
+                    self.internalState = AudioPlayerInternalStateWaitingForData;
+                    QueueEntry* test = [bufferingQueue peek];
+                    if ([test isEqual:next]) {
+                        QueueEntry *entry = [bufferingQueue dequeue];
+                        [self removeBufferedFlag:entry.queueItemId];
+                    }
+                    if ([upcomingQueue peek] == next) {
+                        [upcomingQueue dequeue];
+                    }
+                    [self setCurrentlyReadingEntry:next andStartPlaying:YES];
+                }
             }
             else
             {
@@ -1621,16 +1707,24 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
     
     if (currentlyReadingEntry && currentlyReadingEntry->parsedHeader && currentlyReadingEntry != currentlyPlayingEntry)
     {
+        NIDPRINT(@"读取头部成功，读取的并不是播放的。");
         if (currentAudioStreamBasicDescription.mSampleRate != 0)
         {
+            
             if (memcmp(&currentAudioStreamBasicDescription, &currentlyReadingEntry->audioStreamBasicDescription, sizeof(currentAudioStreamBasicDescription)) != 0)
             {
+                NIDPRINT(@"你是真的要停止读取吗？因为是不同的音频格式");
+                // 先来这里，要停止读取了，现论上会去到currentlyReadingEntry为nil的分支里支，并且停在那里。
                 [currentlyReadingEntry.dataSource unregisterForEvents];
                 
                 if ([bufferingQueue peek] == currentlyReadingEntry)
                 {
-                    [bufferingQueue dequeue];
+                    QueueEntry *entry = [bufferingQueue dequeue];
+                    [self removeBufferedFlag:entry.queueItemId];
+                }else{
+                    // 如果现在加载的不是buffer上面的那个呢？
                 }
+                
                 
                 QueueEntry* newEntry = [[QueueEntry alloc] initWithDataSource:currentlyReadingEntry.dataSource andQueueItemId:currentlyReadingEntry.queueItemId];
                 
@@ -1846,6 +1940,7 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
 
 -(void) resetAudioQueue
 {
+    NIDPRINT(@"重置AudioQueue？");
 	OSStatus error;
     
     pthread_mutex_lock(&playerMutex);
@@ -1897,10 +1992,13 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
 
 -(void) dataSourceDataAvailable:(DataSource*)dataSourceIn
 {
+    NIDPRINT(@"有数据 %@", dataSourceIn);
+    NIDPRINT(@"目前加载中的数据为：%@", currentlyReadingEntry.dataSource);
 	OSStatus error;
     
     if (currentlyReadingEntry.dataSource != dataSourceIn)
     {
+        NIDPRINT(@"读到的数据不是目前加载的，丢弃");
         return;
     }
     
@@ -1918,6 +2016,7 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
     
     if (audioFileStream == 0)
     {
+        NSLog(@"打开文件流");
         error = AudioFileStreamOpen((__bridge void*)self, AudioFileStreamPropertyListenerProc, AudioFileStreamPacketsProc, dataSourceIn.audioFileTypeHint, &audioFileStream);
         
         if (error)
@@ -1960,6 +2059,7 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
 
 -(void) dataSourceErrorOccured:(DataSource*)dataSourceIn
 {
+    NIDPRINT(@"数据源出错了");
     if (currentlyReadingEntry.dataSource != dataSourceIn)
     {
         return;
@@ -1970,6 +2070,7 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
 
 -(void) dataSourceEof:(DataSource*)dataSourceIn
 {
+    NIDPRINT(@"数据源读取结束咯 %@", dataSourceIn);
     if (currentlyReadingEntry.dataSource != dataSourceIn)
     {
         return;
@@ -1977,11 +2078,17 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
     
     if (bytesFilled)
     {
+        NIDPRINT(@"要enqueueBuffer");
         [self enqueueBuffer];
     }
     
     NSObject* queueItemId = currentlyReadingEntry.queueItemId;
+    if (![bufferedEntries containsObject:queueItemId]) {
+        [bufferedEntries addObject:queueItemId];
+    }
     
+    NIDPRINT(@"看看已加载完成的Buffer %@", bufferedEntries);
+
     dispatch_async(dispatch_get_main_queue(), ^
                    {
                        [self.delegate audioPlayer:self didFinishBufferingSourceWithQueueItemId:queueItemId];
@@ -2053,6 +2160,7 @@ static void AudioQueueIsRunningCallbackProc(void* userData, AudioQueueRef audioQ
         if (self.internalState == AudioPlayerInternalStatePaused)
         {
             self.internalState = AudioPlayerInternalStatePlaying;
+            NIDPRINT(@"【播放器】从暂停的状态恢复播放中");
             
             if (seekToTimeWasRequested)
             {

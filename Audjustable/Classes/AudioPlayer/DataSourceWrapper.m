@@ -33,6 +33,7 @@
  **********************************************************************************/
 
 #import "DataSourceWrapper.h"
+#import "NIDebuggingTools.h"
 
 @interface DataSourceWrapper()
 @property (readwrite) DataSource* innerDataSource;
@@ -104,6 +105,7 @@
 
 -(void) dataSourceDataAvailable:(DataSource*)dataSource
 {
+    NIDPRINT(@"有数据 %@", dataSource);
     [self.delegate dataSourceDataAvailable:self];
 }
 

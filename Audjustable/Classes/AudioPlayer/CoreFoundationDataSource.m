@@ -33,6 +33,7 @@
 **********************************************************************************/
 
 #import "CoreFoundationDataSource.h"
+#import "NIDebuggingTools.h"
 
 static void ReadStreamCallbackProc(CFReadStreamRef stream, CFStreamEventType eventType, void* inClientInfo)
 {
@@ -40,8 +41,22 @@ static void ReadStreamCallbackProc(CFReadStreamRef stream, CFStreamEventType eve
     
     switch (eventType)
     {
-        case kCFStreamEventErrorOccurred:
+        case kCFStreamEventErrorOccurred:{
+            CFErrorRef error = CFReadStreamCopyError(stream);
+            CFStringRef errorDomain = CFErrorGetDomain(error);
+            CFStringRef description = CFErrorCopyDescription(error);
+            CFStringRef failureReason = CFErrorCopyFailureReason(error);
+            CFStringRef recoverySuggestion = CFErrorCopyRecoverySuggestion(error);
+            CFDictionaryRef userInfo = CFErrorCopyUserInfo(error);
+            CFIndex errorCode = CFErrorGetCode(error);
+            NSLog(@"errorDomain: %@", errorDomain);
+            NSLog(@"description: %@", description);
+            NSLog(@"failureReason: %@", failureReason);
+            NSLog(@"recoverySuggestion: %@", recoverySuggestion);
+            NSLog(@"userInfo: %@", userInfo);
+            NSLog(@"errorCode: %ld", errorCode);
             [datasource errorOccured];
+        }
             break;
         case kCFStreamEventEndEncountered:
             [datasource eof];
@@ -132,6 +147,7 @@ static void ReadStreamCallbackProc(CFReadStreamRef stream, CFStreamEventType eve
 
 -(BOOL) registerForEvents:(NSRunLoop*)runLoop
 {
+    NIDPRINT(@"registerForEveents %@", self);
     eventsRunLoop = runLoop;
  
     if (stream)

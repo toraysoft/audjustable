@@ -44,18 +44,18 @@
 
 typedef enum
 {
-	AudioPlayerInternalStateInitialised = 0,
-    AudioPlayerInternalStateRunning = 1,
-    AudioPlayerInternalStatePlaying = (1 << 1) | AudioPlayerInternalStateRunning,
-	AudioPlayerInternalStateStartingThread = (1 << 2) | AudioPlayerInternalStateRunning,
-	AudioPlayerInternalStateWaitingForData = (1 << 3) | AudioPlayerInternalStateRunning,
-    AudioPlayerInternalStateWaitingForQueueToStart = (1 << 4) | AudioPlayerInternalStateRunning,
-    AudioPlayerInternalStatePaused = (1 << 5) | AudioPlayerInternalStateRunning,
-    AudioPlayerInternalStateRebuffering = (1 << 6) | AudioPlayerInternalStateRunning,
-    AudioPlayerInternalStateStopping = (1 << 7),
-    AudioPlayerInternalStateStopped = (1 << 8),
-    AudioPlayerInternalStateDisposed = (1 << 9),
-    AudioPlayerInternalStateError = (1 << 10)
+	AudioPlayerInternalStateInitialised = 0, // 初始化完成
+    AudioPlayerInternalStateRunning = 1,  // 运行中
+    AudioPlayerInternalStatePlaying = (1 << 1) | AudioPlayerInternalStateRunning,  // 播放中
+	AudioPlayerInternalStateStartingThread = (1 << 2) | AudioPlayerInternalStateRunning,  // 启动线程中
+	AudioPlayerInternalStateWaitingForData = (1 << 3) | AudioPlayerInternalStateRunning, // 等待数据中
+    AudioPlayerInternalStateWaitingForQueueToStart = (1 << 4) | AudioPlayerInternalStateRunning, // 等待AQ启动中
+    AudioPlayerInternalStatePaused = (1 << 5) | AudioPlayerInternalStateRunning, // 暂停中
+    AudioPlayerInternalStateRebuffering = (1 << 6) | AudioPlayerInternalStateRunning, // 重新缓冲中
+    AudioPlayerInternalStateStopping = (1 << 7), // 停止中
+    AudioPlayerInternalStateStopped = (1 << 8), // 已停止
+    AudioPlayerInternalStateDisposed = (1 << 9), // 已关闭
+    AudioPlayerInternalStateError = (1 << 10) // 出错了。
 }
 AudioPlayerInternalState;
 
@@ -119,38 +119,40 @@ AudioQueueBufferRefLookupEntry;
 @interface AudioPlayer : NSObject<DataSourceDelegate>
 {
 @private
-    UInt8* readBuffer;
+    UInt8* readBuffer;  // 读取到的音频数据缓冲
     int readBufferSize;
 	
     NSOperationQueue* fastApiQueue;
     
-    QueueEntry* currentlyPlayingEntry;
-    QueueEntry* currentlyReadingEntry;
+    QueueEntry* currentlyPlayingEntry; // 当前正在播放的资源
+    QueueEntry* currentlyReadingEntry; // 当前正在加载的资源
     
-    NSMutableArray* upcomingQueue;
-    NSMutableArray* bufferingQueue;
+    NSMutableArray* upcomingQueue; // 未处理的资源队列，里面的单元就是QueueEntry
+    NSMutableArray* bufferingQueue; // 缓存中的资源队列
     
-    AudioQueueBufferRef* audioQueueBuffer;
+    NSMutableArray* bufferedEntries; // 已缓存成功的项目。
+    
+    AudioQueueBufferRef* audioQueueBuffer; // 音频队列缓冲
     AudioQueueBufferRefLookupEntry* audioQueueBufferLookup;
     unsigned int audioQueueBufferRefLookupCount;
     unsigned int audioQueueBufferCount;
-    AudioStreamPacketDescription* packetDescs;
-    bool* bufferUsed;
-    int numberOfBuffersUsed;
+    AudioStreamPacketDescription* packetDescs;  // 音频数据包描述
+    bool* bufferUsed; // 缓冲是否已被用
+    int numberOfBuffersUsed; // 缓存被使用了的数量
     
-    AudioQueueRef audioQueue;
-    AudioStreamBasicDescription currentAudioStreamBasicDescription;
+    AudioQueueRef audioQueue;  // AudioQueue对象
+    AudioStreamBasicDescription currentAudioStreamBasicDescription;  // 当前音频格式描述
     
     NSThread* playbackThread;
     NSRunLoop* playbackThreadRunLoop;
     NSConditionLock* threadFinishedCondLock;
     
-    AudioFileStreamID audioFileStream;
+    AudioFileStreamID audioFileStream; // 音频输入流ID
     
     BOOL discontinuous;
     
-    int bytesFilled;
-	int packetsFilled;
+    int bytesFilled; // 已填充的字节数
+	int packetsFilled; // 已填充的数据包数
     
     int fillBufferIndex;
     
@@ -170,8 +172,8 @@ AudioQueueBufferRefLookupEntry;
     volatile BOOL newFileToPlay;
     volatile double requestedSeekTime;
     volatile BOOL audioQueueFlushing;
-    volatile SInt64 audioPacketsReadCount;
-    volatile SInt64 audioPacketsPlayedCount;
+    volatile SInt64 audioPacketsReadCount; // 已读取的音频包数量
+    volatile SInt64 audioPacketsPlayedCount; // 已播放的音频包数量
 }
 
 @property (readonly) double duration;

@@ -34,6 +34,7 @@
 
 #import "HttpDataSource.h"
 #import "LocalFileDataSource.h"
+#import "NIDebuggingTools.h"
 
 @interface HttpDataSource()
 -(void) open;
@@ -103,6 +104,7 @@
 
 -(void) dataAvailable
 {
+    NIDPRINT(@"有可用数据, %@", self);
     if (fileLength < 0)
     {
         CFTypeRef copyPropertyMessage = CFReadStreamCopyProperty(stream, kCFStreamPropertyHTTPResponseHeader);
@@ -122,6 +124,11 @@
         if (typeIdFromMimeType != 0)
         {
             audioFileTypeHint = typeIdFromMimeType;
+        }
+        if ([contentType isEqual:@"text/html"]) {
+            NIDPRINT(@"有html格式哦，抛出错误啦");
+            [self errorOccured];
+            return;
         }
     }
     
@@ -180,6 +187,7 @@
 
 -(void) open
 {
+    NIDPRINT(@"打开音频流 %@", self);
     CFHTTPMessageRef message = CFHTTPMessageCreateRequest(NULL, (CFStringRef)@"GET", (__bridge CFURLRef)self.url, kCFHTTPVersion1_1);
     
     if (seekStart > 0)
@@ -187,6 +195,7 @@
         CFHTTPMessageSetHeaderFieldValue(message, CFSTR("Range"), (__bridge CFStringRef)[NSString stringWithFormat:@"bytes=%d-", seekStart]);
         
         discontinuous = YES;
+        NSLog(@"range:bytes=%d-", seekStart);
     }
     
     stream = CFReadStreamCreateForHTTPRequest(NULL, message);
@@ -224,13 +233,19 @@
     
     if (!CFReadStreamOpen(stream))
     {
+        NIDPRINT(@"打开stream失败");
         CFRelease(stream);
         CFRelease(message);
         
         return;
     }
     
+    NIDPRINT(@"成功打开音频流 %@", self);
     CFRelease(message);
+}
+
+- (NSString *)description{
+    return [self.url absoluteString];
 }
 
 @end
